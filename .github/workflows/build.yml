@@ -1,5 +1,5 @@
 
-name: DG PS2 Unpacker V04
+name: DG PS2 Unpacker V05
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-i686
 
-      - name: Aplicar correcoes V04
+      - name: Aplicar correcoes V05
         run: |
           cd src
 
@@ -78,98 +78,99 @@ jobs:
               s
           )
 
-          assert n == 1, "SYSCALL nao localizado"
+          assert n == 1
+          p.write_text(s)
 
-          # V04 - Historico circular de instrucoes.
-          old = "void execI() {"
+          # DG V05 - Memory diagnostics
+
+          p = Path("memory.c")
+          s = p.read_text()
+
+          old = "memory[mem] = value;"
 
           new = r'''
-          #define DG_HISTORY 512
-
-          static struct {
-              u32 pc;
-              u32 opcode;
-              u32 regs[32];
-          } dg_history[DG_HISTORY];
-
-          static unsigned int dg_count = 0;
-
-          static void dg_record(u32 pc) {
-              unsigned int i;
-              unsigned int slot = dg_count % DG_HISTORY;
-
-              dg_history[slot].pc = pc;
-              dg_history[slot].opcode = cpuRegs.code;
-
-              for (i = 0; i < 32; i++)
-                  dg_history[slot].regs[i] =
-                      cpuRegs.GPR.r[i].UL[0];
-
-              dg_count++;
-          }
-
-          static void dg_dump(void) {
-              unsigned int i, j, k;
-              unsigned int start =
-                  dg_count > DG_HISTORY ?
-                  dg_count - DG_HISTORY : 0;
-
-              printf("\n=== DG V04 REGISTER HISTORY ===\n");
-
-              for (i = start; i < dg_count; i++) {
-                  j = i % DG_HISTORY;
-
-                  printf("\nPC=%08X OP=%08X\n",
-                         dg_history[j].pc,
-                         dg_history[j].opcode);
-
-                  for (k = 0; k < 32; k++) {
-                      printf("R%02u=%08X ",
-                             k, dg_history[j].regs[k]);
-
-                      if ((k & 3) == 3)
-                          printf("\n");
-                  }
+              if (mem >= 0x01D05AD8 &&
+                  mem <  0x01D05AE4) {
+                  printf(
+                      "DG WRITE PC=%08X ADDR=%08X OLD=%02X NEW=%02X\n",
+                      cpuRegs.pc - 4, mem,
+                      memory[mem], value
+                  );
               }
 
-              printf("\n=== END HISTORY ===\n");
-              fflush(stdout);
-          }
+              if (mem >= 0x01D05ACC &&
+                  mem <  0x01D05AD0) {
+                  printf(
+                      "DG POINTER WRITE PC=%08X ADDR=%08X OLD=%02X NEW=%02X\n",
+                      cpuRegs.pc - 4, mem,
+                      memory[mem], value
+                  );
+              }
 
-          void execI() {
+              memory[mem] = value;
           '''
 
           assert s.count(old) == 1
           s = s.replace(old, new, 1)
 
-          old = "Int_OpcodePrintTable[cpuRegs.code >> 26]();"
+          old = "*out = memory[mem];"
 
           new = r'''
-              dg_record(pc);
+              *out = memory[mem];
 
-              if (pc == 0x01D02550 &&
-                  cpuRegs.GPR.r[16].UL[0] >= 0x02000000) {
+              if ((mem >= 0x01D05ACC &&
+                   mem <  0x01D05AD0) ||
+                  (mem >= 0x01D05AD8 &&
+                   mem <  0x01D05AE4)) {
 
-                  printf("\nDG: Invalid S0 detected\n");
-                  printf("S0=%08X S1=%08X S3=%08X\n",
-                         cpuRegs.GPR.r[16].UL[0],
-                         cpuRegs.GPR.r[17].UL[0],
-                         cpuRegs.GPR.r[19].UL[0]);
+                  printf(
+                      "DG READ PC=%08X ADDR=%08X VALUE=%02X\n",
+                      cpuRegs.pc - 4, mem, *out
+                  );
+              }
+          '''
 
-                  dg_dump();
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+
+          old = "memcpy(memory + mem, bytes, size);"
+
+          new = r'''
+              if (mem >= MEMSIZE ||
+                  size > MEMSIZE - mem) {
+                  printf("DG: Invalid ELF section\n");
+                  exit(-1);
               }
 
-              Int_OpcodePrintTable[cpuRegs.code >> 26]();
+              memcpy(memory + mem, bytes, size);
+
+              printf("DG: Initial pointer bytes: "
+                     "%02X %02X %02X %02X\n",
+                     memory[0x01D05ACC],
+                     memory[0x01D05ACD],
+                     memory[0x01D05ACE],
+                     memory[0x01D05ACF]);
+          '''
+
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+
+          old = "memset(tags, 0, MEMSIZE);"
+
+          new = r'''
+              memset(tags, 0, MEMSIZE);
+              printf("DG: RAM initialized: 32 MB\n");
           '''
 
           assert s.count(old) == 1
           s = s.replace(old, new, 1)
 
           p.write_text(s)
-          print("Correcoes V01-V04 aplicadas.")
+
+          print("Correcoes V05 aplicadas.")
           PY
 
-      - name: Compilar V04
+      - name: Compilar V05
         run: |
           cd src
 
@@ -178,7 +179,7 @@ jobs:
             -O2 \
             -fcommon \
             -I. \
-            '-DVERSION="DG-V04"' \
+            '-DVERSION="DG-V05"' \
             InterTables.c \
             Interpreter.c \
             memory.c \
@@ -198,5 +199,5 @@ jobs:
       - name: Disponibilizar download
         uses: actions/upload-artifact@v4
         with:
-          name: DG-PS2-Unpacker-V04
+          name: DG-PS2-Unpacker-V05
           path: output/
