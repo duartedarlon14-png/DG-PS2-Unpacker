@@ -1,5 +1,5 @@
 
-name: DG PS2 Unpacker V01
+name: DG PS2 Unpacker V02
 
 on:
   workflow_dispatch:
@@ -21,12 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-i686
 
-      - name: Corrigir instrucao TEQ
+      - name: Aplicar correcoes V02
         run: |
           cd src
 
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           p = Path("Interpreter.c")
           s = p.read_text()
@@ -34,7 +35,7 @@ jobs:
           old = "void UnknownOpcode() {"
 
           new = r"""void UnknownOpcode() {
-              /* Darlon Games - TEQ support */
+              /* Darlon Games V01 - TEQ */
               if ((cpuRegs.code & 0xFC00003F) == 0x34) {
                   if (cpuRegs.GPR.r[_Rs_].UD[0] !=
                       cpuRegs.GPR.r[_Rt_].UD[0]) {
@@ -48,11 +49,32 @@ jobs:
           """
 
           assert s.count(old) == 1
-          p.write_text(s.replace(old, new, 1))
-          print("TEQ patch aplicado.")
+          s = s.replace(old, new, 1)
+
+          pattern = r'(void\s+SYSCALL\s*\([^)]*\)\s*\{)'
+
+          patch = r'''
+              /* Darlon Games V02 - GetThreadId */
+              if (cpuRegs.GPR.r[3].UL[0] == 0x2F) {
+                  cpuRegs.GPR.r[2].UD[0] = 1;
+                  printf("DG: GetThreadId = 1\n");
+                  return;
+              }
+          '''
+
+          s, n = re.subn(
+              pattern,
+              lambda m: m.group(0) + patch,
+              s
+          )
+
+          assert n == 1, "SYSCALL handler nao localizado"
+
+          p.write_text(s)
+          print("Correcoes V01 e V02 aplicadas.")
           PY
 
-      - name: Compilar V01
+      - name: Compilar V02
         run: |
           cd src
 
@@ -61,7 +83,7 @@ jobs:
             -O2 \
             -fcommon \
             -I. \
-            '-DVERSION="DG-V01"' \
+            '-DVERSION="DG-V02"' \
             InterTables.c \
             Interpreter.c \
             memory.c \
@@ -81,5 +103,5 @@ jobs:
       - name: Disponibilizar download
         uses: actions/upload-artifact@v4
         with:
-          name: DG-PS2-Unpacker-V01
+          name: DG-PS2-Unpacker-V02
           path: output/
