@@ -1,5 +1,5 @@
 
-name: DG PS2 Unpacker V07
+name: DG PS2 Unpacker V08
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-i686
 
-      - name: Aplicar correcoes V07
+      - name: Aplicar correcoes V08
         run: |
           cd src
 
@@ -89,6 +89,100 @@ jobs:
           )
 
           assert n == 1
+
+          # DG V08 - Diagnostico circular do decoder
+
+          old = "void execI() {"
+
+          new = r'''
+          #define DG_HISTORY 2048
+
+          static struct {
+              u32 pc;
+              u32 opcode;
+              u32 regs[32];
+          } dg_history[DG_HISTORY];
+
+          static unsigned int dg_count = 0;
+
+          static void dg_record(u32 pc) {
+              unsigned int i;
+              unsigned int slot = dg_count % DG_HISTORY;
+
+              dg_history[slot].pc = pc;
+              dg_history[slot].opcode = cpuRegs.code;
+
+              for (i = 0; i < 32; i++)
+                  dg_history[slot].regs[i] =
+                      cpuRegs.GPR.r[i].UL[0];
+
+              dg_count++;
+          }
+
+          static void dg_dump(void) {
+              unsigned int i, j, k;
+              unsigned int start =
+                  dg_count > DG_HISTORY ?
+                  dg_count - DG_HISTORY : 0;
+
+              printf("\n=== DG V08 DECODER HISTORY ===\n");
+
+              for (i = start; i < dg_count; i++) {
+                  j = i % DG_HISTORY;
+
+                  printf("\nPC=%08X OP=%08X\n",
+                         dg_history[j].pc,
+                         dg_history[j].opcode);
+
+                  for (k = 0; k < 32; k++) {
+                      printf("R%02u=%08X ",
+                             k, dg_history[j].regs[k]);
+
+                      if ((k & 3) == 3)
+                          printf("\n");
+                  }
+              }
+
+              printf("\n=== END HISTORY ===\n");
+              fflush(stdout);
+          }
+
+          void execI() {
+          '''
+
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+
+          old = "Int_OpcodePrintTable[cpuRegs.code >> 26]();"
+
+          new = r'''
+              dg_record(pc);
+
+              if (pc == 0x01D00438 &&
+                  cpuRegs.GPR.r[14].UL[0] >= 0x02000000) {
+
+                  printf("\nDG V08: Invalid decoder address\n");
+
+                  printf("T2=%08X T6=%08X T8=%08X\n",
+                         cpuRegs.GPR.r[10].UL[0],
+                         cpuRegs.GPR.r[14].UL[0],
+                         cpuRegs.GPR.r[24].UL[0]);
+
+                  printf("A0=%08X A1=%08X A2=%08X A3=%08X\n",
+                         cpuRegs.GPR.r[4].UL[0],
+                         cpuRegs.GPR.r[5].UL[0],
+                         cpuRegs.GPR.r[6].UL[0],
+                         cpuRegs.GPR.r[7].UL[0]);
+
+                  dg_dump();
+              }
+
+              Int_OpcodePrintTable[cpuRegs.code >> 26]();
+          '''
+
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+
           p.write_text(s)
 
           # DG V06 - Correcao de gravacao de 128 bits
@@ -126,7 +220,8 @@ jobs:
 
           new = r'''
               memset(tags, 0, MEMSIZE);
-              printf("DG V07: Corrected 128-bit memory writes\n");
+              printf("DG V08: Corrected 128-bit memory writes\n");
+              printf("DG V08: Decoder diagnostics enabled\n");
           '''
 
           assert s.count(old) == 1
@@ -134,10 +229,10 @@ jobs:
 
           p.write_text(s)
 
-          print("DG V07: Todas as correcoes aplicadas.")
+          print("DG V08: Todas as correcoes aplicadas.")
           PY
 
-      - name: Compilar V07
+      - name: Compilar V08
         run: |
           cd src
 
@@ -146,7 +241,7 @@ jobs:
             -O2 \
             -fcommon \
             -I. \
-            '-DVERSION="DG-V07"' \
+            '-DVERSION="DG-V08"' \
             InterTables.c \
             Interpreter.c \
             memory.c \
@@ -166,5 +261,5 @@ jobs:
       - name: Disponibilizar download
         uses: actions/upload-artifact@v4
         with:
-          name: DG-PS2-Unpacker-V07
+          name: DG-PS2-Unpacker-V08
           path: output/
