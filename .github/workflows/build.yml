@@ -1,5 +1,5 @@
 
-name: DG PS2 Unpacker V05
+name: DG PS2 Unpacker V06
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-i686
 
-      - name: Aplicar correcoes V05
+      - name: Aplicar correcoes V06
         run: |
           cd src
 
@@ -81,27 +81,47 @@ jobs:
           assert n == 1
           p.write_text(s)
 
-          # DG V05 - Memory diagnostics
+          # DG V06 - Corrigir gravacao de 128 bits
 
           p = Path("memory.c")
           s = p.read_text()
 
+          pattern = (
+              r'void\s+memWrite128\s*'
+              r'\(u32\s+mem,\s*u64\s*\*\s*value\)'
+              r'\s*\{[^{}]*\}'
+          )
+
+          replacement = r'''
+          void memWrite128(u32 mem, u64 *value)
+          {
+              unsigned int i;
+              const u8 *bytes = (const u8 *)value;
+
+              for (i = 0; i < 16; i++) {
+                  memWrite8(mem + i, bytes[i]);
+              }
+          }
+          '''
+
+          s, n = re.subn(
+              pattern,
+              lambda m: replacement,
+              s
+          )
+
+          assert n == 1, "memWrite128 nao localizada"
+
+          # Verificar o ponteiro durante a emulacao
+
           old = "memory[mem] = value;"
 
           new = r'''
-              if (mem >= 0x01D05AD8 &&
-                  mem <  0x01D05AE4) {
-                  printf(
-                      "DG WRITE PC=%08X ADDR=%08X OLD=%02X NEW=%02X\n",
-                      cpuRegs.pc - 4, mem,
-                      memory[mem], value
-                  );
-              }
-
               if (mem >= 0x01D05ACC &&
                   mem <  0x01D05AD0) {
+
                   printf(
-                      "DG POINTER WRITE PC=%08X ADDR=%08X OLD=%02X NEW=%02X\n",
+                      "DG POINTER PC=%08X ADDR=%08X OLD=%02X NEW=%02X\n",
                       cpuRegs.pc - 4, mem,
                       memory[mem], value
                   );
@@ -113,53 +133,11 @@ jobs:
           assert s.count(old) == 1
           s = s.replace(old, new, 1)
 
-          old = "*out = memory[mem];"
-
-          new = r'''
-              *out = memory[mem];
-
-              if ((mem >= 0x01D05ACC &&
-                   mem <  0x01D05AD0) ||
-                  (mem >= 0x01D05AD8 &&
-                   mem <  0x01D05AE4)) {
-
-                  printf(
-                      "DG READ PC=%08X ADDR=%08X VALUE=%02X\n",
-                      cpuRegs.pc - 4, mem, *out
-                  );
-              }
-          '''
-
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
-
-          old = "memcpy(memory + mem, bytes, size);"
-
-          new = r'''
-              if (mem >= MEMSIZE ||
-                  size > MEMSIZE - mem) {
-                  printf("DG: Invalid ELF section\n");
-                  exit(-1);
-              }
-
-              memcpy(memory + mem, bytes, size);
-
-              printf("DG: Initial pointer bytes: "
-                     "%02X %02X %02X %02X\n",
-                     memory[0x01D05ACC],
-                     memory[0x01D05ACD],
-                     memory[0x01D05ACE],
-                     memory[0x01D05ACF]);
-          '''
-
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
-
           old = "memset(tags, 0, MEMSIZE);"
 
           new = r'''
               memset(tags, 0, MEMSIZE);
-              printf("DG: RAM initialized: 32 MB\n");
+              printf("DG V06: Corrected 128-bit memory writes\n");
           '''
 
           assert s.count(old) == 1
@@ -167,10 +145,10 @@ jobs:
 
           p.write_text(s)
 
-          print("Correcoes V05 aplicadas.")
+          print("V06: Bug memWrite128 corrigido.")
           PY
 
-      - name: Compilar V05
+      - name: Compilar V06
         run: |
           cd src
 
@@ -179,7 +157,7 @@ jobs:
             -O2 \
             -fcommon \
             -I. \
-            '-DVERSION="DG-V05"' \
+            '-DVERSION="DG-V06"' \
             InterTables.c \
             Interpreter.c \
             memory.c \
@@ -199,5 +177,5 @@ jobs:
       - name: Disponibilizar download
         uses: actions/upload-artifact@v4
         with:
-          name: DG-PS2-Unpacker-V05
+          name: DG-PS2-Unpacker-V06
           path: output/
