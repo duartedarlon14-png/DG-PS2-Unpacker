@@ -1,5 +1,5 @@
 
-name: DG PS2 Unpacker V06
+name: DG PS2 Unpacker V07
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-mingw-w64-i686
 
-      - name: Aplicar correcoes V06
+      - name: Aplicar correcoes V07
         run: |
           cd src
 
@@ -70,6 +70,16 @@ jobs:
                          cpuRegs.GPR.r[4].UL[0]);
                   return;
               }
+
+              /* DG V07 - SignalSema */
+              if (cpuRegs.GPR.r[3].UL[0] == 0x42) {
+                  cpuRegs.GPR.r[2].UD[0] =
+                      cpuRegs.GPR.r[4].UL[0];
+
+                  printf("DG: SignalSema(%08X) simulated\n",
+                         cpuRegs.GPR.r[4].UL[0]);
+                  return;
+              }
           '''
 
           s, n = re.subn(
@@ -81,7 +91,7 @@ jobs:
           assert n == 1
           p.write_text(s)
 
-          # DG V06 - Corrigir gravacao de 128 bits
+          # DG V06 - Correcao de gravacao de 128 bits
 
           p = Path("memory.c")
           s = p.read_text()
@@ -112,32 +122,11 @@ jobs:
 
           assert n == 1, "memWrite128 nao localizada"
 
-          # Verificar o ponteiro durante a emulacao
-
-          old = "memory[mem] = value;"
-
-          new = r'''
-              if (mem >= 0x01D05ACC &&
-                  mem <  0x01D05AD0) {
-
-                  printf(
-                      "DG POINTER PC=%08X ADDR=%08X OLD=%02X NEW=%02X\n",
-                      cpuRegs.pc - 4, mem,
-                      memory[mem], value
-                  );
-              }
-
-              memory[mem] = value;
-          '''
-
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
-
           old = "memset(tags, 0, MEMSIZE);"
 
           new = r'''
               memset(tags, 0, MEMSIZE);
-              printf("DG V06: Corrected 128-bit memory writes\n");
+              printf("DG V07: Corrected 128-bit memory writes\n");
           '''
 
           assert s.count(old) == 1
@@ -145,10 +134,10 @@ jobs:
 
           p.write_text(s)
 
-          print("V06: Bug memWrite128 corrigido.")
+          print("DG V07: Todas as correcoes aplicadas.")
           PY
 
-      - name: Compilar V06
+      - name: Compilar V07
         run: |
           cd src
 
@@ -157,7 +146,7 @@ jobs:
             -O2 \
             -fcommon \
             -I. \
-            '-DVERSION="DG-V06"' \
+            '-DVERSION="DG-V07"' \
             InterTables.c \
             Interpreter.c \
             memory.c \
@@ -177,5 +166,5 @@ jobs:
       - name: Disponibilizar download
         uses: actions/upload-artifact@v4
         with:
-          name: DG-PS2-Unpacker-V06
+          name: DG-PS2-Unpacker-V07
           path: output/
