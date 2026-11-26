@@ -1,0 +1,85 @@
+
+name: DG PS2 Unpacker V01
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar codigo original
+        run: |
+          git clone https://github.com/ps2homebrew/ps2-unpacker.git src
+
+      - name: Instalar compilador Windows
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-i686
+
+      - name: Corrigir instrucao TEQ
+        run: |
+          cd src
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("Interpreter.c")
+          s = p.read_text()
+
+          old = "void UnknownOpcode() {"
+
+          new = r"""void UnknownOpcode() {
+              /* Darlon Games - TEQ support */
+              if ((cpuRegs.code & 0xFC00003F) == 0x34) {
+                  if (cpuRegs.GPR.r[_Rs_].UD[0] !=
+                      cpuRegs.GPR.r[_Rt_].UD[0]) {
+                      return;
+                  }
+
+                  printf("\nDG: TEQ trap at %08X\n",
+                         cpuRegs.pc - 4);
+                  exit(-1);
+              }
+          """
+
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1))
+          print("TEQ patch aplicado.")
+          PY
+
+      - name: Compilar V01
+        run: |
+          cd src
+
+          i686-w64-mingw32-gcc \
+            -std=gnu99 \
+            -O2 \
+            -fcommon \
+            -I. \
+            '-DVERSION="DG-V01"' \
+            InterTables.c \
+            Interpreter.c \
+            memory.c \
+            ps2-unpacker.c \
+            DisR5900asm.c \
+            DisR5900.c \
+            MMI.c \
+            -o DG-PS2-Unpacker.exe
+
+      - name: Criar pacote
+        run: |
+          mkdir -p output
+          cp src/DG-PS2-Unpacker.exe output/
+          cp src/LICENSE output/
+          cp -r src output/source
+
+      - name: Disponibilizar download
+        uses: actions/upload-artifact@v4
+        with:
+          name: DG-PS2-Unpacker-V01
+          path: output/
